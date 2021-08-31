@@ -872,6 +872,47 @@ int handle_transfer(gw_context_t* ctx,
   return 0;
 }
 
+// the js vm
+int execute_in_duktape(gw_context_t* ctx,
+                      evmc_message* msg,
+                      uint32_t _parent_from_id,
+                      uint32_t from_id,
+                      uint32_t to_id,
+                      const uint8_t* code_data,
+                      const size_t code_size,
+                      struct evmc_result* res) {
+  int ret = 0;
+  evmc_address sender = msg->sender;
+  evmc_address destination = msg->destination;
+  struct evmc_host_context context {ctx, code_data, code_size, from_id, to_id, sender, destination, 0};
+  struct evmc_vm* vm = evmc_create_evmone();
+  struct evmc_host_interface interface = {account_exists, get_storage,    set_storage,    get_balance,
+                                          get_code_size,  get_code_hash,  copy_code,      selfdestruct,
+                                          call,           get_tx_context, get_block_hash, emit_log};
+  /* Execute the code in JS VM */
+  debug_print_int("[execute_in_duktape] code size", code_size);
+  debug_print_int("[execute_in_duktape] input_size", msg->input_size);
+  *res = vm->execute(vm, &interface, &context, EVMC_MAX_REVISION, msg, code_data, code_size);
+  if (res->status_code != EVMC_SUCCESS && res->status_code != EVMC_REVERT) {
+    res->output_data = NULL;
+    res->output_size = 0;
+  }
+  if (context.error_code != 0) {
+    debug_print_int("[execute_in_duktape] context.error_code", context.error_code);
+    ret = context.error_code;
+    goto evmc_vm_cleanup;
+  }
+  if (res->gas_left < 0) {
+    ckb_debug("[execute_in_duktape] gas not enough");
+    ret = EVMC_OUT_OF_GAS;
+    goto evmc_vm_cleanup;
+  }
+
+evmc_vm_cleanup:
+  evmc_destroy(vm); // destroy the VM instance
+  return ret;
+}
+
 int execute_in_evmone(gw_context_t* ctx,
                       evmc_message* msg,
                       uint32_t _parent_from_id,
