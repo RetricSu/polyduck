@@ -11,6 +11,8 @@
 #include <evmc/evmc.h>
 #include <evmc/evmc.hpp>
 #include <evmone/evmone.h>
+#include <duktape.h>
+#include "duktape_utils.h"
 
 #ifdef NO_DEBUG_LOG
 int printf(const char *format, ...) { return 0; }
@@ -886,30 +888,71 @@ int execute_in_duktape(gw_context_t* ctx,
   evmc_address destination = msg->destination;
   struct evmc_host_context context {ctx, code_data, code_size, from_id, to_id, sender, destination, 0};
   struct evmc_vm* vm = evmc_create_evmone();
-  struct evmc_host_interface interface = {account_exists, get_storage,    set_storage,    get_balance,
-                                          get_code_size,  get_code_hash,  copy_code,      selfdestruct,
-                                          call,           get_tx_context, get_block_hash, emit_log};
-  /* Execute the code in JS VM */
+
   debug_print_int("[execute_in_duktape] code size", code_size);
   debug_print_int("[execute_in_duktape] input_size", msg->input_size);
-  *res = vm->execute(vm, &interface, &context, EVMC_MAX_REVISION, msg, code_data, code_size);
+
+  // initialize duktape vm
+  debug_print_int("[execute_in_duktape] init duktape vm instace", 1);
+  duk_context* duk_ctx = duk_create_heap_default();
+  duk_push_c_function(duk_ctx, native_print, 1 /*nargs*/);
+  duk_put_global_string(duk_ctx, "print");
+  push_file_as_string(duk_ctx, "contract.js");
+  if (duk_peval(duk_ctx) != 0) {
+    printf("Error: %s\n", duk_safe_to_string(duk_ctx, -1));
+  }
+  duk_pop(duk_ctx); 
+  duk_push_global_object(duk_ctx);
+  encode_duktape_vm_props(duk_ctx);
+
+  // get storage
+  load_contract_status(duk_ctx);
+
+  // save storage
+  save_contract_status(duk_ctx);
+
+  /* Execute the code in JS VM */
+  duk_get_prop_string(duk_ctx, -1, "set");
+  duk_push_int(duk_ctx, 10);
+
+  if (duk_pcall(duk_ctx, 1 /*nargs*/) != 0) {
+     printf("set Error: %s\n", duk_safe_to_string(duk_ctx, -1));
+  } else {
+     printf("set result: %s\n", duk_safe_to_string(duk_ctx, -1));
+  }
+  duk_pop(duk_ctx);  /* pop result/error */
+  duk_get_prop_string(duk_ctx, -1 /*index*/, "get");
+  if (duk_pcall(duk_ctx, 0 /*nargs*/) != 0) {
+    printf("get Error: %s\n", duk_safe_to_string(duk_ctx, -1));
+  } else {
+    printf("get result: %s\n", duk_safe_to_string(duk_ctx, -1));
+  }
+  duk_pop(duk_ctx);  /* pop result/error */
+  printf("execute in duktape vm finished!\n");
+
+  res->status_code = EVMC_SUCCESS;
+  res->gas_left = 100;
+  res->output_data = NULL;
+  res->output_size = 0;
+
   if (res->status_code != EVMC_SUCCESS && res->status_code != EVMC_REVERT) {
     res->output_data = NULL;
     res->output_size = 0;
   }
+
   if (context.error_code != 0) {
     debug_print_int("[execute_in_duktape] context.error_code", context.error_code);
     ret = context.error_code;
-    goto evmc_vm_cleanup;
+    goto duktape_vm_cleanup;
   }
   if (res->gas_left < 0) {
     ckb_debug("[execute_in_duktape] gas not enough");
     ret = EVMC_OUT_OF_GAS;
-    goto evmc_vm_cleanup;
+    goto duktape_vm_cleanup;
   }
 
-evmc_vm_cleanup:
-  evmc_destroy(vm); // destroy the VM instance
+duktape_vm_cleanup:
+  duk_destroy_heap(duk_ctx); // destroy the VM instance
   return ret;
 }
 
@@ -1120,7 +1163,7 @@ int handle_message(gw_context_t* ctx,
   debug_print_int("[handle_message] msg.kind", msg.kind);
   /* NOTE: msg and res are updated */
   if (to_address_exists && code_size > 0 && (is_create(msg.kind) || msg.input_size > 0)) {
-    ret = execute_in_evmone(ctx, &msg, parent_from_id, from_id, to_id, code_data, code_size, res);
+    ret = execute_in_duktape(ctx, &msg, parent_from_id, from_id, to_id, code_data, code_size, res);
     if (ret != 0) {
       return ret;
     }

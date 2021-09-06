@@ -15,9 +15,10 @@ CFLAGS_ETHASH := -Ideps/ethash/include -Ideps/ethash/lib/ethash -Ideps/ethash/li
 CFLAGS_CRYPTO_ALGORITHMS := -Ideps/crypto-algorithms
 CFLAGS_MBEDTLS := -Ideps/mbedtls/include
 CFLAGS_EVMONE := -Ideps/evmone/lib/evmone -Ideps/evmone/include -Ideps/evmone/evmc/include
+CFLAGS_DUKTAPE := -Ideps/duktape/dist/src
 CFLAGS_SMT := -Ideps/godwoken-scripts/c/deps/sparse-merkle-tree/c
 CFLAGS_GODWOKEN := -Ideps/godwoken-scripts/c
-CFLAGS := -O3 -Ic/ripemd160 $(CFLAGS_CKB_STD) $(CFLAGS_EVMONE) $(CFLAGS_INTX) $(CFLAGS_BN128) $(CFLAGS_ETHASH) $(CFLAGS_CRYPTO_ALGORITHMS) $(CFLAGS_MBEDTLS) $(CFLAGS_SMT) $(CFLAGS_GODWOKEN) $(CFLAGS_SECP) -Wall -g -fdata-sections -ffunction-sections
+CFLAGS := -O3 -Ic/ripemd160 $(CFLAGS_CKB_STD) $(CFLAGS_EVMONE) $(CFLAGS_DUKTAPE) $(CFLAGS_INTX) $(CFLAGS_BN128) $(CFLAGS_ETHASH) $(CFLAGS_CRYPTO_ALGORITHMS) $(CFLAGS_MBEDTLS) $(CFLAGS_SMT) $(CFLAGS_GODWOKEN) $(CFLAGS_SECP) -Wall -g -fdata-sections -ffunction-sections
 CXXFLAGS := $(CFLAGS) -std=c++1z
 LDFLAGS := -Wl,--gc-sections
 
@@ -28,7 +29,7 @@ MOLC_VERSION := 0.6.1
 PROTOCOL_VERSION := 2221efdfcf06351fa1884ea0f2df1604790c3378
 PROTOCOL_SCHEMA_URL := https://raw.githubusercontent.com/nervosnetwork/godwoken/${PROTOCOL_VERSION}/crates/types/schemas
 
-ALL_OBJS := build/evmone.o build/baseline.o build/analysis.o build/instruction_metrics.o build/instruction_names.o build/execution.o build/instructions.o build/instructions_calls.o \
+ALL_OBJS := build/duktape.o build/evmone.o build/baseline.o build/analysis.o build/instruction_metrics.o build/instruction_names.o build/execution.o build/instructions.o build/instructions_calls.o \
   build/keccak.o build/keccakf800.o \
   build/sha256.o build/memzero.o build/ripemd160.o build/bignum.o build/platform_util.o
 BIN_DEPS := c/contracts.h c/sudt_contracts.h c/other_contracts.h c/polyjuice.h c/polyjuice_utils.h build/secp256k1_data_info.h $(ALL_OBJS)
@@ -45,9 +46,9 @@ DUKTAPE_BUILD_DOCKER := python:2.7-buster
 all: build/test_contracts build/test_rlp build/generator build/validator build/generator_log build/validator_log build/test_ripemd160 build/blockchain.h build/godwoken.h
 
 all-via-docker: generate-protocol
+#	make duktape-via-docker
 	mkdir -p build
 	docker run --rm -v `pwd`:/code ${BUILDER_DOCKER} bash -c "cd /code && make"
-	make duktape-via-docker
 
 clean-via-docker:
 	mkdir -p build
@@ -104,6 +105,8 @@ build/test_ripemd160: c/ripemd160/test_ripemd160.c c/ripemd160/ripemd160.h c/rip
 	$(CXX) $(CFLAGS) $(LDFLAGS) -Ibuild -o $@ c/ripemd160/test_ripemd160.c $(ALL_OBJS)
 	riscv64-unknown-elf-run build/test_ripemd160
 
+build/duktape.o: deps/duktape/dist/src/duktape.c
+	$(CC) $(CFLAGS) $(LDFLAGS) -c -o $@ $<
 build/evmone.o: deps/evmone/lib/evmone/evmone.cpp
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -c -o $@ $< -DPROJECT_VERSION=\"0.5.0-dev\"
 build/baseline.o: deps/evmone/lib/evmone/baseline.cpp
