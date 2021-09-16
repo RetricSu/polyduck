@@ -11,7 +11,6 @@
 #include <evmc/evmc.h>
 #include <evmc/evmc.hpp>
 #include <evmone/evmone.h>
-#include <duktape.h>
 #include "duktape_utils.h"
 
 #ifdef NO_DEBUG_LOG
@@ -874,6 +873,186 @@ int handle_transfer(gw_context_t* ctx,
   return 0;
 }
 
+void test_save_var(gw_context_t* gw_ctx, uint32_t account_id){
+  const uint8_t k[8] = "123"; 
+  const uint8_t * key = k;
+  const uint64_t key_len = sizeof(key);
+  const uint8_t value[GW_VALUE_BYTES] = "456";
+  sys_store(gw_ctx, account_id, key, key_len, value);
+  uint8_t return_value[GW_VALUE_BYTES]; 
+  sys_load(gw_ctx, account_id, key, key_len, return_value);
+  const char* val = (char *) return_value;
+  ckb_debug("test load from gw:");
+  ckb_debug(val);
+}
+
+int store_js_contract(gw_context_t* ctx,
+                        uint32_t to_id,
+                        uint8_t* code,
+                        uint32_t code_size
+                      ) {
+  int ret;
+  uint8_t key[32];
+  uint8_t data_hash[32];
+  blake2b_hash(data_hash, code, code_size);
+  polyjuice_build_contract_code_key(to_id, key);
+  ckb_debug("BEGIN store data key for js contract");
+  debug_print_data("data_hash", data_hash, 32);
+  /* to_id must exists here */
+  ret = ctx->sys_store(ctx, to_id, key, GW_KEY_BYTES, data_hash);
+  if (ret != 0) {
+    return ret;
+  }
+  ckb_debug("BEGIN store data for js contract");
+  ret = ctx->sys_store_data(ctx, code_size, code);
+  ckb_debug("END store data");
+  if (ret != 0) {
+    return ret;
+  }
+  return 0;
+}
+
+void hex_to_bin(const char * str, uint8_t * bytes, size_t blen)
+{
+   uint8_t  pos;
+   uint8_t  idx0;
+   uint8_t  idx1;
+
+   // mapping of ASCII characters to hex values
+   const uint8_t hashmap[] =
+   {
+     0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, // 01234567
+     0x08, 0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 89:;<=>?
+     0x00, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x00, // @ABCDEFG
+     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // HIJKLMNO
+   };
+
+   memset(bytes, 0, blen);
+   for (pos = 0; ((pos < (blen*2)) && (pos < strlen(str))); pos += 2)
+   {
+      idx0 = ((uint8_t)str[pos+0] & 0x1F) ^ 0x10;
+      idx1 = ((uint8_t)str[pos+1] & 0x1F) ^ 0x10;
+      bytes[pos/2] = (uint8_t)(hashmap[idx0] << 4) | hashmap[idx1];
+   };
+}
+
+int test_store_js_contract(
+  gw_context_t* ctx,
+  uint32_t to_id
+){
+  uint8_t code[MAX_DATA_SIZE] = {
+    0x76,0x61,0x72,0x20,0x73,0x74,0x6f,0x72,0x65,0x64,0x44,0x61,0x74,0x61,0x20,0x3d,0x20,0x30,0x3b,0x0a,0x0a,0x66,0x75,0x6e,0x63,0x74,0x69,0x6f,0x6e,0x20,0x73,0x65,0x74,0x28,0x78,0x29,0x20,0x7b,0x0a,0x20,0x20,0x73,0x74,0x6f,0x72,0x65,0x64,0x44,0x61,0x74,0x61,0x20,0x3d,0x20,0x78,0x3b,0x0a,0x7d,0x0a,0x0a,0x66,0x75,0x6e,0x63,0x74,0x69,0x6f,0x6e,0x20,0x67,0x65,0x74,0x28,0x29,0x20,0x7b,0x0a,0x20,0x20,0x72,0x65,0x74,0x75,0x72,0x6e,0x20,0x73,0x74,0x6f,0x72,0x65,0x64,0x44,0x61,0x74,0x61,0x3b,0x0a,0x7d,0x0a    
+  };
+  int ret = store_js_contract(ctx, to_id, (uint8_t*) code, 100);
+  if(ret != 0){
+    return ret;
+  } 
+  return 0;
+}
+
+uint64_t test_load_js_contract(
+  gw_context_t* ctx,
+  uint32_t to_id,
+  uint8_t code[MAX_DATA_SIZE]
+){
+  uint64_t code_size = MAX_DATA_SIZE;
+  int ret = load_account_code(ctx, to_id, &code_size, 0, code);
+  if (ret != 0) {
+    ckb_debug("load_account_code failed");
+    return 0;
+  }
+  return code_size;
+}
+
+void test_duktape_vm(gw_context_t* gw_ctx, uint32_t to_id){
+  // initialize duktape vm
+  debug_print_int("[execute_in_duktape] init duktape vm instace", 1);
+  duk_context* duk_ctx = create_duktape_vm();
+  duk_push_c_function(duk_ctx, native_print, 1 /*nargs*/);
+  duk_put_global_string(duk_ctx, "print");
+
+  // load contract
+  uint8_t code[MAX_DATA_SIZE];
+  uint64_t code_size = test_load_js_contract(gw_ctx, to_id, code);
+  ckb_debug("load js contract code...");
+  ckb_debug((char*) code);
+  debug_print_int("[execute_in_duktape] code size", code_size);
+  char expected_code[MAX_DATA_SIZE] = {
+    0x76,0x61,0x72,0x20,0x73,0x74,0x6f,0x72,0x65,0x64,0x44,0x61,0x74,0x61,0x20,0x3d,0x20,0x30,0x3b,0x0a,0x0a,0x66,0x75,0x6e,0x63,0x74,0x69,0x6f,0x6e,0x20,0x73,0x65,0x74,0x28,0x78,0x29,0x20,0x7b,0x0a,0x20,0x20,0x73,0x74,0x6f,0x72,0x65,0x64,0x44,0x61,0x74,0x61,0x20,0x3d,0x20,0x78,0x3b,0x0a,0x7d,0x0a,0x0a,0x66,0x75,0x6e,0x63,0x74,0x69,0x6f,0x6e,0x20,0x67,0x65,0x74,0x28,0x29,0x20,0x7b,0x0a,0x20,0x20,0x72,0x65,0x74,0x75,0x72,0x6e,0x20,0x73,0x74,0x6f,0x72,0x65,0x64,0x44,0x61,0x74,0x61,0x3b,0x0a,0x7d,0x0a  
+  };
+  ckb_debug(expected_code);
+
+  duk_register_js_contract(duk_ctx, (const char*) expected_code, (size_t) code_size);
+
+  if (duk_peval(duk_ctx) != 0) {
+    ckb_debug("duktape vm Error");
+    ckb_debug(duk_safe_to_string(duk_ctx, -1));
+    // printf("duktape vm Error: %s\n", duk_safe_to_string(duk_ctx, -1));
+  }
+  duk_pop(duk_ctx); 
+  duk_push_global_object(duk_ctx);
+  encode_duktape_vm_props(duk_ctx);
+  
+  // get storage
+  load_contract_status(duk_ctx);
+
+  // save storage
+  save_contract_status(duk_ctx);
+
+  /* Execute the code in JS VM */
+
+  /* get method */
+  duk_get_prop_string(duk_ctx, -1 /*index*/, "get");
+  if (duk_pcall(duk_ctx, 0 /*nargs*/) != 0) {
+    ckb_debug("duktape contract: get Error");
+    ckb_debug(duk_safe_to_string(duk_ctx, -1));
+    // printf("get Error: %s\n", duk_safe_to_string(duk_ctx, -1));
+  } else {
+    ckb_debug("duktape contract: get Result");
+    ckb_debug(duk_safe_to_string(duk_ctx, -1)); 
+    // printf("get result: %s\n", duk_safe_to_string(duk_ctx, -1));
+  }
+  duk_pop(duk_ctx);  /* pop result/error */
+
+  /* set method */
+  duk_get_prop_string(duk_ctx, -1, "set");
+  duk_push_int(duk_ctx, 10);
+  if (duk_pcall(duk_ctx, 1 /*nargs*/) != 0) {
+     ckb_debug("duktape contract: set Error");
+     ckb_debug(duk_safe_to_string(duk_ctx, -1));
+     // printf("set Error: %s\n", duk_safe_to_string(duk_ctx, -1));
+  } else {
+     const char* result = duk_safe_to_string(duk_ctx, -1);
+     ckb_debug("duktape contract: set Result");
+     ckb_debug(result);
+     // printf("set result: %s\n", duk_safe_to_string(duk_ctx, -1));
+  }
+  duk_pop(duk_ctx);  /* pop result/error */
+
+  /* get method */
+  duk_get_prop_string(duk_ctx, -1 /*index*/, "get");
+  if (duk_pcall(duk_ctx, 0 /*nargs*/) != 0) {
+    ckb_debug("duktape contract: get Error");
+    ckb_debug(duk_safe_to_string(duk_ctx, -1));
+    // printf("get Error: %s\n", duk_safe_to_string(duk_ctx, -1));
+  } else {
+    ckb_debug("duktape contract: get Result");
+    ckb_debug(duk_safe_to_string(duk_ctx, -1)); 
+    // printf("get result: %s\n", duk_safe_to_string(duk_ctx, -1));
+  }
+  duk_pop(duk_ctx);  /* pop result/error */
+
+  printf("execute in duktape vm finished!\n");
+  duk_destroy_heap(duk_ctx);
+
+  //  res->status_code = EVMC_SUCCESS;
+  //  res->gas_left = 100;
+  //  res->output_data = NULL;
+  //  res->output_size = 0;
+  // duktape_vm_cleanup:
+  //   duk_destroy_heap(duk_ctx); // destroy the VM instance
+}
+
 // the js vm
 int execute_in_duktape(gw_context_t* ctx,
                       evmc_message* msg,
@@ -888,52 +1067,23 @@ int execute_in_duktape(gw_context_t* ctx,
   evmc_address destination = msg->destination;
   struct evmc_host_context context {ctx, code_data, code_size, from_id, to_id, sender, destination, 0};
   struct evmc_vm* vm = evmc_create_evmone();
+  struct evmc_host_interface interface = {account_exists, get_storage,    set_storage,    get_balance,
+                                          get_code_size,  get_code_hash,  copy_code,      selfdestruct,
+                                          call,           get_tx_context, get_block_hash, emit_log};
+
 
   debug_print_int("[execute_in_duktape] code size", code_size);
   debug_print_int("[execute_in_duktape] input_size", msg->input_size);
-
-  // initialize duktape vm
-  debug_print_int("[execute_in_duktape] init duktape vm instace", 1);
-  duk_context* duk_ctx = duk_create_heap_default();
-  duk_push_c_function(duk_ctx, native_print, 1 /*nargs*/);
-  duk_put_global_string(duk_ctx, "print");
-  push_file_as_string(duk_ctx, "contract.js");
-  if (duk_peval(duk_ctx) != 0) {
-    printf("Error: %s\n", duk_safe_to_string(duk_ctx, -1));
+  debug_print_data("msg->input_data", msg->input_data, msg->input_size);
+  
+  if(!is_create(msg->kind)){
+    //test_duktape_vm(ctx, to_id);
+    //test_save_var(ctx, to_id);
+  }else{
+   // test_store_js_contract(ctx, to_id);
   }
-  duk_pop(duk_ctx); 
-  duk_push_global_object(duk_ctx);
-  encode_duktape_vm_props(duk_ctx);
-
-  // get storage
-  load_contract_status(duk_ctx);
-
-  // save storage
-  save_contract_status(duk_ctx);
-
-  /* Execute the code in JS VM */
-  duk_get_prop_string(duk_ctx, -1, "set");
-  duk_push_int(duk_ctx, 10);
-
-  if (duk_pcall(duk_ctx, 1 /*nargs*/) != 0) {
-     printf("set Error: %s\n", duk_safe_to_string(duk_ctx, -1));
-  } else {
-     printf("set result: %s\n", duk_safe_to_string(duk_ctx, -1));
-  }
-  duk_pop(duk_ctx);  /* pop result/error */
-  duk_get_prop_string(duk_ctx, -1 /*index*/, "get");
-  if (duk_pcall(duk_ctx, 0 /*nargs*/) != 0) {
-    printf("get Error: %s\n", duk_safe_to_string(duk_ctx, -1));
-  } else {
-    printf("get result: %s\n", duk_safe_to_string(duk_ctx, -1));
-  }
-  duk_pop(duk_ctx);  /* pop result/error */
-  printf("execute in duktape vm finished!\n");
-
-  res->status_code = EVMC_SUCCESS;
-  res->gas_left = 100;
-  res->output_data = NULL;
-  res->output_size = 0;
+  
+  *res = vm->execute(vm, &interface, &context, EVMC_MAX_REVISION, msg, code_data, code_size);
 
   if (res->status_code != EVMC_SUCCESS && res->status_code != EVMC_REVERT) {
     res->output_data = NULL;
@@ -952,7 +1102,8 @@ int execute_in_duktape(gw_context_t* ctx,
   }
 
 duktape_vm_cleanup:
-  duk_destroy_heap(duk_ctx); // destroy the VM instance
+  // duk_destroy_heap(duk_ctx); // destroy the VM instance
+  evmc_destroy(vm);
   return ret;
 }
 
@@ -975,6 +1126,9 @@ int execute_in_evmone(gw_context_t* ctx,
   /* Execute the code in EVM */
   debug_print_int("[execute_in_evmone] code size", code_size);
   debug_print_int("[execute_in_evmone] input_size", msg->input_size);
+  debug_print_int("[execute_in_evmone] input_data", 1);
+  //ckb_debug((const char*) msg->input_data);
+  ckb_debug("load done for msg->input_data");
   *res = vm->execute(vm, &interface, &context, EVMC_MAX_REVISION, msg, code_data, code_size);
   if (res->status_code != EVMC_SUCCESS && res->status_code != EVMC_REVERT) {
     res->output_data = NULL;
@@ -1163,7 +1317,10 @@ int handle_message(gw_context_t* ctx,
   debug_print_int("[handle_message] msg.kind", msg.kind);
   /* NOTE: msg and res are updated */
   if (to_address_exists && code_size > 0 && (is_create(msg.kind) || msg.input_size > 0)) {
+    printf("ready to execute in both vms");
+    
     ret = execute_in_duktape(ctx, &msg, parent_from_id, from_id, to_id, code_data, code_size, res);
+    //ret = execute_in_evmone(ctx, &msg, parent_from_id, from_id, to_id, code_data, code_size, res);
     if (ret != 0) {
       return ret;
     }

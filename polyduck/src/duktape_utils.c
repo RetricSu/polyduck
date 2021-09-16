@@ -1,9 +1,5 @@
-#ifndef DUKTAPE_UTILS_
-#define DUKTAPE_UTILS_
-
 #include <stdio.h>
-#include <duktape.h>
-#include "ckb_syscalls.h"
+#include "duktape.h" 
 
 #define NUMBER_OF_STRING 4
 #define MAX_STRING_SIZE 40
@@ -85,21 +81,12 @@ static void save_contract_status(duk_context *ctx){
    duk_pop(ctx);
    duk_get_prop_string(ctx, -1, prop_name);
    if (duk_check_type(ctx, -1, DUK_TYPE_NUMBER)) {
-    //duk_int_t prop_value = duk_to_int(ctx, -1);
-    //printf("%s: [%s]:%d\n", string, prop_name, prop_value);
-    const char* prop_value = duk_to_string(ctx, -1);
-    ckb_debug("prop_name:");
-    ckb_debug(prop_name);
-    ckb_debug("prop_value:");
-    ckb_debug(prop_value);
+    duk_int_t prop_value = duk_to_int(ctx, -1);
+    printf("%s: [%s]:%d\n", string, prop_name, prop_value);
     duk_pop(ctx);
    }else{
      const char* prop_value = duk_to_string(ctx, -1);
-     //printf("%s: [%s]:%s\n", string, prop_name, prop_value);
-     ckb_debug("prop_name:");
-     ckb_debug(prop_name);
-     ckb_debug("prop_value:");
-     ckb_debug(prop_value);
+     printf("%s: [%s]:%s\n", string, prop_name, prop_value);
      duk_pop(ctx);
    }
   }
@@ -128,8 +115,19 @@ static void load_contract_status(duk_context *ctx){
   }
 }
 
-static void duk_register_js_contract(duk_context *ctx, const char *code, size_t len) {
-    duk_push_lstring(ctx, code, (duk_size_t) len);
+static void push_file_as_string(duk_context *ctx, const char *filename) {
+    FILE *f;
+    size_t len;
+    char buf[16384];
+
+    f = fopen(filename, "rb");
+    if (f) {
+        len = fread((void *) buf, 1, sizeof(buf), f);
+        fclose(f);
+	     printf("code: %p, size: %ld\n", buf, len);
+        duk_push_lstring(ctx, (const char *) buf, (duk_size_t) len);
+    } else {
+        duk_push_undefined(ctx);
+    }
 }
 
-#endif  /* DUKTAPE_UTILS_ */

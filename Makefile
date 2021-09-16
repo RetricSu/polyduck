@@ -29,7 +29,7 @@ MOLC_VERSION := 0.6.1
 PROTOCOL_VERSION := 2221efdfcf06351fa1884ea0f2df1604790c3378
 PROTOCOL_SCHEMA_URL := https://raw.githubusercontent.com/nervosnetwork/godwoken/${PROTOCOL_VERSION}/crates/types/schemas
 
-ALL_OBJS := build/duktape.o build/evmone.o build/baseline.o build/analysis.o build/instruction_metrics.o build/instruction_names.o build/execution.o build/instructions.o build/instructions_calls.o \
+ALL_OBJS := build/duktape.o build/duktape_utils.o build/evmone.o build/baseline.o build/analysis.o build/instruction_metrics.o build/instruction_names.o build/execution.o build/instructions.o build/instructions_calls.o \
   build/keccak.o build/keccakf800.o \
   build/sha256.o build/memzero.o build/ripemd160.o build/bignum.o build/platform_util.o
 BIN_DEPS := c/contracts.h c/sudt_contracts.h c/other_contracts.h c/polyjuice.h c/polyjuice_utils.h build/secp256k1_data_info.h $(ALL_OBJS)
@@ -53,6 +53,10 @@ all-via-docker: generate-protocol
 clean-via-docker:
 	mkdir -p build
 	docker run --rm -v `pwd`:/code ${BUILDER_DOCKER} bash -c "cd /code && make clean"
+
+log-version-via-docker: generate-protocol
+	mkdir -p build
+	docker run --rm -v `pwd`:/code ${BUILDER_DOCKER} bash -c "cd /code && make build/generator_log && make build/validator_log"
 
 dist: clean-via-docker all-via-docker
 
@@ -107,8 +111,10 @@ build/test_ripemd160: c/ripemd160/test_ripemd160.c c/ripemd160/ripemd160.h c/rip
 
 build/duktape.o: deps/duktape/dist/src/duktape.c
 	$(CC) $(CFLAGS) $(LDFLAGS) -c -o $@ $<
+build/duktape_utils.o: deps/duktape/dist/src/duktape_utils.c
+	$(CC) $(CFLAGS) $(LDFLAGS) -c -o $@ $<
 build/evmone.o: deps/evmone/lib/evmone/evmone.cpp
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) -c -o $@ $< -DPROJECT_VERSION=\"0.5.0-dev\"
+	$(CXX) $(CXXFLAGS) $cLDFLAGS) -c -o $@ $< -DPROJECT_VERSION=\"0.5.0-dev\"
 build/baseline.o: deps/evmone/lib/evmone/baseline.cpp
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -c -o $@ $<
 build/analysis.o: deps/evmone/lib/evmone/analysis.cpp
