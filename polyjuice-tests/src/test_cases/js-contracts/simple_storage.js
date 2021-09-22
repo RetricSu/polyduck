@@ -1,11 +1,9 @@
-storedData = 0;
-mytext = 1;
+var storedData = 0;
 
 function set(x) {
- mytext = 2;
-storedData = x;
+  storedData = x;
 }
 
 function get() {
-return storedData;
+  return storedData;
 }

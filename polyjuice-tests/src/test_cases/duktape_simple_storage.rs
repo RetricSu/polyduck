@@ -10,7 +10,7 @@ use crate::helper::{
     use gw_store::chain_view::ChainView;
     use gw_types::{bytes::Bytes, packed::RawL2Transaction, prelude::*};
     
-    const INIT_CODE: &str = include_str!("./evm-contracts/SimpleStorage.bin");
+    const INIT_CODE: &str = include_str!("./js-contracts/simple_storage.bin");
     
     #[test]
     fn test_duk_simple_storage() {
@@ -61,7 +61,7 @@ use crate::helper::{
 	    state.apply_run_result(&run_result).expect("update state");
 	    println!("return_data: {}", hex::encode(&run_result.return_data[..]));
 	    // 557534 < 560K
-	    helper::check_cycles("Deploy SimpleStorage", run_result.used_cycles, 560_000);
+	    // helper::check_cycles("Deploy SimpleStorage", run_result.used_cycles, 560_000);
 	}
     
 	let contract_account_script =
@@ -83,10 +83,10 @@ use crate::helper::{
 	    hex::encode(&contract_account_script.args().raw_data().as_ref()[36..])
 	);
 	{
-	    // SimpleStorage.set(0x0d10);
+	    // SimpleStorage.set(0x100150e1);
 	    let block_info = new_block_info(0, 2, 0);
 	    let input =
-		hex::decode("60fe47b10000000000000000000000000000000000000000000000000000000000000d10")
+		hex::decode("7365740000000000000000000000000000000000000000000000000000000000100150e1")
 		    .unwrap();
 	    let args = PolyjuiceArgsBuilder::default()
 		.gas_limit(21000)
@@ -111,13 +111,13 @@ use crate::helper::{
 		.expect("construct");
 	    state.apply_run_result(&run_result).expect("update state");
 	    // 489767 < 500K
-	    helper::check_cycles("SimpleStorage.set", run_result.used_cycles, 500_000);
+	    // helper::check_cycles("SimpleStorage.set", run_result.used_cycles, 500_000);
 	}
     
 	{
 	    // SimpleStorage.get();
 	    let block_info = new_block_info(0, 3, 0);
-	    let input = hex::decode("6d4ce63c").unwrap();
+	    let input = hex::decode("67657400").unwrap();
 	    let args = PolyjuiceArgsBuilder::default()
 		.gas_limit(21000)
 		.gas_price(1)
@@ -141,8 +141,10 @@ use crate::helper::{
 		.expect("construct");
 	    state.apply_run_result(&run_result).expect("update state");
 	    let mut expected_return_data = vec![0u8; 32];
-	    expected_return_data[30] = 0x0d;
-	    expected_return_data[31] = 0x10;
+	    expected_return_data[28] = 0x10;
+	    expected_return_data[29] = 0x01;
+	    expected_return_data[30] = 0x50;
+	    expected_return_data[31] = 0xe1;
 	    assert_eq!(run_result.return_data, expected_return_data);
 	}
     

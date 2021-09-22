@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #include "ckb_syscalls.h"
 #include "godwoken.h"
@@ -301,6 +302,7 @@ int load_account_code(gw_context_t* gw_ctx, uint32_t account_id,
   }
 
   uint64_t old_code_size = *code_size;
+  debug_print_data("data_hash:", data_hash, 32);
   ret = gw_ctx->sys_load_data(gw_ctx, data_hash, code_size, offset, code);
   if (ret != 0) {
     ckb_debug("[load_account_code] sys_load_data failed");
@@ -886,6 +888,13 @@ void test_save_var(gw_context_t* gw_ctx, uint32_t account_id){
   ckb_debug(val);
 }
 
+uint8_t* calc_method_selector(const uint8_t* name, size_t size){
+  union ethash_hash256 ethash = ethash::keccak256(name, size);
+  uint8_t hash[32]; 
+  memcpy(hash, ethash.bytes, 32);
+  return ethash.bytes;
+}
+
 int store_js_contract(gw_context_t* ctx,
                         uint32_t to_id,
                         uint8_t* code,
@@ -950,6 +959,20 @@ int test_store_js_contract(
   return 0;
 }
 
+int store_js_contract_code(
+  gw_context_t* ctx,
+  uint32_t to_id
+){
+  uint8_t code[MAX_DATA_SIZE] = {
+    0x76,0x61,0x72,0x20,0x73,0x74,0x6f,0x72,0x65,0x64,0x44,0x61,0x74,0x61,0x20,0x3d,0x20,0x30,0x3b,0x0a,0x0a,0x66,0x75,0x6e,0x63,0x74,0x69,0x6f,0x6e,0x20,0x73,0x65,0x74,0x28,0x78,0x29,0x20,0x7b,0x0a,0x20,0x20,0x73,0x74,0x6f,0x72,0x65,0x64,0x44,0x61,0x74,0x61,0x20,0x3d,0x20,0x78,0x3b,0x0a,0x7d,0x0a,0x0a,0x66,0x75,0x6e,0x63,0x74,0x69,0x6f,0x6e,0x20,0x67,0x65,0x74,0x28,0x29,0x20,0x7b,0x0a,0x20,0x20,0x72,0x65,0x74,0x75,0x72,0x6e,0x20,0x73,0x74,0x6f,0x72,0x65,0x64,0x44,0x61,0x74,0x61,0x3b,0x0a,0x7d,0x0a    
+  };
+  int ret = store_js_contract(ctx, to_id, (uint8_t*) code, 100);
+  if(ret != 0){
+    return ret;
+  } 
+  return 0;
+}
+
 uint64_t test_load_js_contract(
   gw_context_t* ctx,
   uint32_t to_id,
@@ -993,10 +1016,10 @@ void test_duktape_vm(gw_context_t* gw_ctx, uint32_t to_id){
   duk_push_global_object(duk_ctx);
   encode_duktape_vm_props(duk_ctx);
   
-  // get storage
+  // load saving status of properties from godwoken sys storage
   load_contract_status(duk_ctx);
 
-  // save storage
+  //saving status of properties to godwoken sys storage
   save_contract_status(duk_ctx);
 
   /* Execute the code in JS VM */
@@ -1053,6 +1076,207 @@ void test_duktape_vm(gw_context_t* gw_ctx, uint32_t to_id){
   //   duk_destroy_heap(duk_ctx); // destroy the VM instance
 }
 
+int duktape_dummy_int_parameter_4bytes_encode(uint8_t* value, int length){
+  //int result = 0;
+  //uint8_t* value_int;
+  //memcpy(value_int, value, length);
+  int value_int;
+  sscanf((char*)value, "%d", &value_int);
+  return value_int;
+  // for(int i=0;i<length;i++){
+  //   //result = result + (int)value_int[i] * pow(16, (length - i - 1)*2 );
+  // }
+  // return result;
+}
+
+int set_duktape_storage(gw_context_t* gw_ctx,
+                        uint32_t to_id,
+                                     uint8_t* key,
+                                     uint8_t* value) {
+  //ckb_debug("BEGIN duktape set_storage");
+  int status = 0;
+  int ret = gw_ctx->sys_store(gw_ctx, to_id,
+                                       key, GW_KEY_BYTES, value);
+  if (ret != 0) {
+    debug_print_int("sys_store failed", ret);
+    status = 1;
+  }
+  //ckb_debug("END duktape set_storage");
+  return status;
+}
+
+uint8_t* get_duktape_storage(gw_context_t* gw_ctx, uint32_t to_id, uint8_t* key) {
+  //ckb_debug("BEGIN get_storage");
+  uint8_t* value{0};
+  int ret = gw_ctx->sys_load(gw_ctx, to_id,
+                                      key, GW_KEY_BYTES, value);
+  if (ret != 0) {
+    debug_print_int("get_duktape_storage, sys_load failed", ret);
+  }
+  //ckb_debug("END get_duktape_storage");
+  return value;
+}
+
+static void save_duktape_contract_status(duk_context *ctx, gw_context_t* gw_ctx, uint32_t to_id){
+  duk_get_prop_string(ctx, -1, "length");
+  duk_int_t length = duk_to_int(ctx, -1);
+  duk_pop(ctx);
+  for (int i = 0; i < length; ++i)
+  {
+   char string[16] = {0};
+   int_to_string(i,string);
+   duk_get_prop_string(ctx, -1, string);
+   const char *prop_name = duk_to_string(ctx, -1);
+   duk_pop(ctx);
+   duk_get_prop_string(ctx, -1, prop_name);
+   if (duk_check_type(ctx, -1, DUK_TYPE_NUMBER)) {
+    const char* prop_value = duk_to_string(ctx, -1);
+    //ckb_debug(prop_name);
+    //ckb_debug(prop_value);
+    // ready to save
+    set_duktape_storage(gw_ctx, to_id, (uint8_t*)prop_name, (uint8_t*)prop_value); 
+    duk_pop(ctx);
+
+    // uint8_t* v = get_duktape_storage(gw_ctx, to_id, (uint8_t*)prop_name);
+    // ckb_debug("get the value just stored:");
+    // ckb_debug((const char*)v);
+   }else{
+     const char* prop_value = duk_to_string(ctx, -1);
+     //ckb_debug(prop_name);
+     //ckb_debug(prop_value);
+     // ready to save
+     set_duktape_storage(gw_ctx, to_id, (uint8_t*)prop_name, (uint8_t*)prop_value); 
+     duk_pop(ctx);
+
+     // uint8_t* v = get_duktape_storage(gw_ctx, to_id, (uint8_t*)prop_name);
+     // ckb_debug("get the value just stored:");
+     // ckb_debug((const char*)v);
+   }
+  }
+}
+
+static void load_duktape_contract_status(duk_context *ctx, gw_context_t* gw_ctx, uint32_t to_id){
+  duk_get_prop_string(ctx, -1, "length");
+  duk_int_t length = duk_to_int(ctx, -1);
+  duk_pop(ctx);
+  for (int i = 0; i < length; ++i)
+  {
+   char string[16] = {0};
+   int_to_string(i,string);
+   duk_get_prop_string(ctx, -1, string);
+   const char *prop_name = duk_to_string(ctx, -1);
+   duk_pop(ctx);
+   duk_get_prop_string(ctx, -1, prop_name);
+   if (duk_check_type(ctx, -1, DUK_TYPE_NUMBER)) {
+    duk_int_t prop_value = duk_to_int(ctx, -1);
+    duk_pop(ctx);
+    // ckb_debug("load props from storage");
+    // ckb_debug(prop_name);
+    uint8_t* load_value = get_duktape_storage(gw_ctx, to_id, (uint8_t*)prop_name );
+    //ckb_debug((const char*)load_value);
+    int load_value_int = duktape_dummy_int_parameter_4bytes_encode(load_value, 4); // 4 bytes for int parameter 
+    debug_print_int("load int props value from storage", load_value_int);
+    duk_push_int(ctx, load_value_int);
+    duk_put_global_string(ctx, prop_name);
+   }else{
+     duk_safe_to_string(ctx, -1);
+     duk_pop(ctx);
+   }
+  }
+}
+
+// initialize duktape vm
+duk_context* init_duktape_vm(){
+  ckb_debug("[execute_in_duktape] init duktape vm instace");
+  duk_context* duk_ctx = create_duktape_vm();
+  duk_push_c_function(duk_ctx, native_print, 1 /*nargs*/);
+  duk_put_global_string(duk_ctx, "print");
+  return duk_ctx;
+}
+
+uint64_t load_js_contract(
+  gw_context_t* ctx,
+  uint32_t to_id,
+  uint8_t code[MAX_DATA_SIZE]
+){
+  uint64_t code_size = MAX_DATA_SIZE;
+  int ret = load_account_code(ctx, to_id, &code_size, 0, code);
+  if (ret != 0) {
+    ckb_debug("load_account_code failed");
+    return 0;
+  }
+  return code_size;
+}
+
+// load and initialize duktape js contract
+void init_duktape_contract(gw_context_t* gw_ctx, duk_context* duk_ctx, uint32_t to_id){
+  uint8_t code[MAX_DATA_SIZE];
+  uint64_t code_size = load_js_contract(gw_ctx, to_id, code);
+  ckb_debug("load js contract code...");
+  //ckb_debug((char*) code);
+  debug_print_data("[execute_in_duktape] load code", code, code_size);
+  debug_print_int("[execute_in_duktape] code size", code_size);
+
+  duk_register_js_contract(duk_ctx, (const char*) code, (size_t) code_size);
+
+  if (duk_peval(duk_ctx) != 0) {
+    ckb_debug("duktape vm Error");
+    ckb_debug(duk_safe_to_string(duk_ctx, -1));
+  }
+  duk_pop(duk_ctx); 
+  duk_push_global_object(duk_ctx);
+  encode_duktape_vm_props(duk_ctx);
+
+  // load saving status of properties from godwoken sys storage 
+  load_duktape_contract_status(duk_ctx, gw_ctx, to_id);
+}
+
+// only support one int type parameter for now
+const char* execute_contract_method_with_dummy_parameters(duk_context* duk_ctx, char* method_name, int parameter, int status, gw_context_t* gw_ctx, uint32_t to_id){
+  duk_get_prop_string(duk_ctx, -1 /*index*/, method_name);
+  duk_push_int(duk_ctx, parameter);
+  if (duk_pcall(duk_ctx, 1 /*nargs*/) != 0) {
+    const char* err = duk_safe_to_string(duk_ctx, -1);
+    ckb_debug("[execute in duktape] contract: execute method Error");
+    ckb_debug(err);
+    duk_pop(duk_ctx);  /* pop result/error */
+    status = 1;
+    return err;
+  }
+
+  const char* result = duk_safe_to_string(duk_ctx, -1);
+  debug_print_data("[execute in duktape] execute method with_dummy_parameters result", (const uint8_t*) result, (uint32_t) sizeof(result) );
+  ckb_debug(result);
+  duk_pop(duk_ctx);  /* pop result/error */
+  
+  // saving status of properties to godwoken sys storage
+  save_duktape_contract_status(duk_ctx, gw_ctx, to_id);
+  status = 0;
+  return result;
+}
+
+const char* execute_contract_method(duk_context* duk_ctx, char* method_name, int status, gw_context_t* gw_ctx, uint32_t to_id){
+  duk_get_prop_string(duk_ctx, -1 /*index*/, method_name);
+  if (duk_pcall(duk_ctx, 0 /*nargs*/) != 0) {
+    const char* err = duk_safe_to_string(duk_ctx, -1);
+    ckb_debug("[execute in duktape] contract: execute method Error");
+    ckb_debug(err);
+    duk_pop(duk_ctx);  /* pop result/error */
+    status = 1;
+    return err;
+  }
+
+  const char* result = duk_safe_to_string(duk_ctx, -1);
+  debug_print_data("[execute in duktape] execute method result", (const uint8_t*) result, (uint32_t) sizeof(result) );
+  ckb_debug(result);
+  duk_pop(duk_ctx);  /* pop result/error */
+  
+  // saving status of properties to godwoken sys storage
+  save_duktape_contract_status(duk_ctx, gw_ctx, to_id);
+  status = 0;
+  return result;
+}
+
 // the js vm
 int execute_in_duktape(gw_context_t* ctx,
                       evmc_message* msg,
@@ -1076,18 +1300,59 @@ int execute_in_duktape(gw_context_t* ctx,
   debug_print_int("[execute_in_duktape] input_size", msg->input_size);
   debug_print_data("msg->input_data", msg->input_data, msg->input_size);
   
-  if(!is_create(msg->kind)){
-    //test_duktape_vm(ctx, to_id);
-    //test_save_var(ctx, to_id);
-  }else{
-   // test_store_js_contract(ctx, to_id);
-  }
-  
-  *res = vm->execute(vm, &interface, &context, EVMC_MAX_REVISION, msg, code_data, code_size);
+  // const char method[] = "get()";
+  // union ethash_hash256 ethash = ethash::keccak256((const uint8_t*) method, sizeof(method)-1); // remove /0 at the end
+  // debug_print_data("keccak hash for get():", (const uint8_t*)ethash.bytes, 32);
 
-  if (res->status_code != EVMC_SUCCESS && res->status_code != EVMC_REVERT) {
-    res->output_data = NULL;
-    res->output_size = 0;
+  // if(!is_create(msg->kind)){
+  //   test_duktape_vm(ctx, to_id);
+  //   test_save_var(ctx, to_id);
+  // }else{
+  //   test_store_js_contract(ctx, to_id);
+  // }
+  duk_context* duk_ctx = init_duktape_vm();
+
+  if(is_create(msg->kind)){
+     res->output_data = code_data;
+     res->output_size = code_size; 
+     ret = EVMC_SUCCESS;
+     goto duktape_vm_cleanup;
+  }else{
+    int status;
+    char method_exec_result[32] = {0};
+
+    init_duktape_contract(ctx, duk_ctx, to_id);
+    const char* method_name = (const char*) msg->input_data;
+    debug_print_data("extract method name from input_data", msg->input_data, 4);
+    ckb_debug(method_name);
+
+    if(msg->input_size >= 36){ // has method parameter
+      uint8_t* method_parameter;
+      // we use dummy parameter encoding which suppose last 4 bytes is a hex value for simplity
+      memcpy(method_parameter, &(msg->input_data)[32], 4);
+      debug_print_data("extract method parameter from input_data", (const uint8_t*) method_parameter, 4);
+      int parameter_int = (int)method_parameter[0] * pow(16, 6) + (int)method_parameter[1] * pow(16, 4) + (int)method_parameter[2] * pow(16, 2) + (int)method_parameter[3];
+      debug_print_int("covert parameter to int", parameter_int);
+      const char* exec_result = execute_contract_method_with_dummy_parameters(duk_ctx, (char*)method_name, parameter_int, status, ctx, to_id);
+      memcpy(&method_exec_result[28], &exec_result, 4);
+    }else{
+      const char* exec_result = execute_contract_method(duk_ctx, (char*)method_name, status, ctx, to_id);
+      memcpy(&method_exec_result[28], &exec_result, 4);
+    }
+
+    if(status != 0){
+      res->status_code = EVMC_REVERT;
+    }
+    if(status == 0){
+      res->status_code = EVMC_SUCCESS;
+      res->output_data = (const uint8_t*) method_exec_result;
+      res->output_size = sizeof(method_exec_result);
+    }
+
+    if (res->status_code != EVMC_SUCCESS && res->status_code != EVMC_REVERT) {
+      res->output_data = NULL;
+      res->output_size = 0;
+    }
   }
 
   if (context.error_code != 0) {
@@ -1103,6 +1368,8 @@ int execute_in_duktape(gw_context_t* ctx,
 
 duktape_vm_cleanup:
   // duk_destroy_heap(duk_ctx); // destroy the VM instance
+  ckb_debug("execute in duktape vm finished!\n");
+  duk_destroy_heap(duk_ctx);
   evmc_destroy(vm);
   return ret;
 }
@@ -1320,7 +1587,6 @@ int handle_message(gw_context_t* ctx,
     printf("ready to execute in both vms");
     
     ret = execute_in_duktape(ctx, &msg, parent_from_id, from_id, to_id, code_data, code_size, res);
-    //ret = execute_in_evmone(ctx, &msg, parent_from_id, from_id, to_id, code_data, code_size, res);
     if (ret != 0) {
       return ret;
     }
@@ -1335,10 +1601,12 @@ int handle_message(gw_context_t* ctx,
   /* Store contract code though syscall */
   if (is_create(msg.kind)) {
     // TODO: check code length < MAX_DATA_SIZE
-    ret = store_contract_code(ctx, to_id, res);
-    if (ret != 0) {
+    debug_print_data("ready to store js contract code", res->output_data, res->output_size);
+    int ret = store_js_contract(ctx, to_id, (uint8_t*)res->output_data, res->output_size);
+    if(ret != 0){
       return ret;
-    }
+    } 
+    return 0;
   }
 
   /* Rewrite create_address when call kind is CREATE/CREATE2 */

@@ -15,7 +15,7 @@ CFLAGS_ETHASH := -Ideps/ethash/include -Ideps/ethash/lib/ethash -Ideps/ethash/li
 CFLAGS_CRYPTO_ALGORITHMS := -Ideps/crypto-algorithms
 CFLAGS_MBEDTLS := -Ideps/mbedtls/include
 CFLAGS_EVMONE := -Ideps/evmone/lib/evmone -Ideps/evmone/include -Ideps/evmone/evmc/include
-CFLAGS_DUKTAPE := -Ideps/duktape/dist/src
+CFLAGS_DUKTAPE := -Ipolyduck/src
 CFLAGS_SMT := -Ideps/godwoken-scripts/c/deps/sparse-merkle-tree/c
 CFLAGS_GODWOKEN := -Ideps/godwoken-scripts/c
 CFLAGS := -O3 -Ic/ripemd160 $(CFLAGS_CKB_STD) $(CFLAGS_EVMONE) $(CFLAGS_DUKTAPE) $(CFLAGS_INTX) $(CFLAGS_BN128) $(CFLAGS_ETHASH) $(CFLAGS_CRYPTO_ALGORITHMS) $(CFLAGS_MBEDTLS) $(CFLAGS_SMT) $(CFLAGS_GODWOKEN) $(CFLAGS_SECP) -Wall -g -fdata-sections -ffunction-sections
@@ -46,7 +46,6 @@ DUKTAPE_BUILD_DOCKER := python:2.7-buster
 all: build/test_contracts build/test_rlp build/generator build/validator build/generator_log build/validator_log build/test_ripemd160 build/blockchain.h build/godwoken.h
 
 all-via-docker: generate-protocol
-#	make duktape-via-docker
 	mkdir -p build
 	docker run --rm -v `pwd`:/code ${BUILDER_DOCKER} bash -c "cd /code && make"
 
@@ -59,9 +58,6 @@ log-version-via-docker: generate-protocol
 	docker run --rm -v `pwd`:/code ${BUILDER_DOCKER} bash -c "cd /code && make build/generator_log && make build/validator_log"
 
 dist: clean-via-docker all-via-docker
-
-duktape-via-docker:
-	docker run --rm -v `pwd`/deps/duktape:/code ${DUKTAPE_BUILD_DOCKER} bash -c "pip install pyYaml && cd /code && python util/dist.py"
 
 build/generator: c/generator.c $(GENERATOR_DEPS)
 	cd $(SECP_DIR) && (git apply workaround-fix-g++-linking.patch || true) && cd - # apply patch
@@ -109,9 +105,9 @@ build/test_ripemd160: c/ripemd160/test_ripemd160.c c/ripemd160/ripemd160.h c/rip
 	$(CXX) $(CFLAGS) $(LDFLAGS) -Ibuild -o $@ c/ripemd160/test_ripemd160.c $(ALL_OBJS)
 	riscv64-unknown-elf-run build/test_ripemd160
 
-build/duktape.o: deps/duktape/dist/src/duktape.c
+build/duktape.o: polyduck/src/duktape.c
 	$(CC) $(CFLAGS) $(LDFLAGS) -c -o $@ $<
-build/duktape_utils.o: deps/duktape/dist/src/duktape_utils.c
+build/duktape_utils.o: polyduck/src/duktape_utils.c
 	$(CC) $(CFLAGS) $(LDFLAGS) -c -o $@ $<
 build/evmone.o: deps/evmone/lib/evmone/evmone.cpp
 	$(CXX) $(CXXFLAGS) $cLDFLAGS) -c -o $@ $< -DPROJECT_VERSION=\"0.5.0-dev\"
@@ -190,3 +186,6 @@ clean:
 	rm -rf build/*
 	cd $(SECP_DIR) && [ -f "Makefile" ] && make distclean && make clean || echo "skip secp256k1 clean"
 	rm -rf $(SECP256K1_SRC)
+
+duk_test:
+	cd polyjuice-tests && RUST_LOG=gw=debug cargo test test_duk_simple_storage

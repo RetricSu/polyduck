@@ -85,21 +85,19 @@ static void save_contract_status(duk_context *ctx){
    duk_pop(ctx);
    duk_get_prop_string(ctx, -1, prop_name);
    if (duk_check_type(ctx, -1, DUK_TYPE_NUMBER)) {
-    //duk_int_t prop_value = duk_to_int(ctx, -1);
-    //printf("%s: [%s]:%d\n", string, prop_name, prop_value);
     const char* prop_value = duk_to_string(ctx, -1);
-    ckb_debug("prop_name:");
-    ckb_debug(prop_name);
-    ckb_debug("prop_value:");
-    ckb_debug(prop_value);
+    // ckb_debug("prop_name:");
+    // ckb_debug(prop_name);
+    // ckb_debug("prop_value:");
+    // ckb_debug(prop_value);
     duk_pop(ctx);
    }else{
      const char* prop_value = duk_to_string(ctx, -1);
      //printf("%s: [%s]:%s\n", string, prop_name, prop_value);
-     ckb_debug("prop_name:");
-     ckb_debug(prop_name);
-     ckb_debug("prop_value:");
-     ckb_debug(prop_value);
+     // ckb_debug("prop_name:");
+     // ckb_debug(prop_name);
+     // ckb_debug("prop_value:");
+     // ckb_debug(prop_value);
      duk_pop(ctx);
    }
   }
