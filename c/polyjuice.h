@@ -1185,6 +1185,24 @@ static void load_duktape_contract_status(duk_context *ctx, gw_context_t* gw_ctx,
   }
 }
 
+int StringHextoHex(char *str, unsigned char *out, int *outlen)
+{
+    if (str == NULL || out == NULL)
+        return -1;
+
+    int i = 0, ret = 0;
+
+    ret = (strlen(str) / (2 * sizeof(char))) + strlen(str) % (2 * sizeof(char));
+
+    for (i = 0; i < ret; i++)
+        sscanf(str + 2 * i, "%02X", (unsigned int *)(out + i));
+
+    if (outlen!= NULL)
+        *outlen = ret;
+
+    return ret;
+}
+
 // initialize duktape vm
 duk_context* init_duktape_vm(){
   ckb_debug("[execute_in_duktape] init duktape vm instace");
@@ -1244,15 +1262,25 @@ const char* execute_contract_method_with_dummy_parameters(duk_context* duk_ctx, 
     return err;
   }
 
-  const char* result = duk_safe_to_string(duk_ctx, -1);
-  debug_print_data("[execute in duktape] execute method with_dummy_parameters result", (const uint8_t*) result, (uint32_t) sizeof(result) );
-  ckb_debug(result);
-  duk_pop(duk_ctx);  /* pop result/error */
-  
-  // saving status of properties to godwoken sys storage
-  save_duktape_contract_status(duk_ctx, gw_ctx, to_id);
-  status = 0;
-  return result;
+  if (duk_check_type(duk_ctx, -1, DUK_TYPE_NUMBER)){
+    const char* result = (const char*) duk_to_uint32(duk_ctx, -1);
+    debug_print_data("[execute in duktape] execute method with_dummy_parameters result (number)", (const uint8_t*) result, (uint32_t) sizeof(result) );
+    ckb_debug(result);
+    duk_pop(duk_ctx);  /* pop result/error */ 
+    // saving status of properties to godwoken sys storage
+    save_duktape_contract_status(duk_ctx, gw_ctx, to_id);
+    status = 0;
+    return result;
+  }else{
+    const char* result = duk_safe_to_string(duk_ctx, -1);
+    debug_print_data("[execute in duktape] execute method with_dummy_parameters result", (const uint8_t*) result, (uint32_t) sizeof(result) );
+    ckb_debug(result);
+    duk_pop(duk_ctx);  /* pop result/error */
+    // saving status of properties to godwoken sys storage
+    save_duktape_contract_status(duk_ctx, gw_ctx, to_id);
+    status = 0;
+    return result;
+  }
 }
 
 const char* execute_contract_method(duk_context* duk_ctx, char* method_name, int status, gw_context_t* gw_ctx, uint32_t to_id){
@@ -1266,15 +1294,78 @@ const char* execute_contract_method(duk_context* duk_ctx, char* method_name, int
     return err;
   }
 
-  const char* result = duk_safe_to_string(duk_ctx, -1);
-  debug_print_data("[execute in duktape] execute method result", (const uint8_t*) result, (uint32_t) sizeof(result) );
-  ckb_debug(result);
-  duk_pop(duk_ctx);  /* pop result/error */
-  
-  // saving status of properties to godwoken sys storage
-  save_duktape_contract_status(duk_ctx, gw_ctx, to_id);
-  status = 0;
-  return result;
+ // const char* result = duk_safe_to_string(duk_ctx, -1);
+ // debug_print_data("[execute in duktape] execute method result", (const uint8_t*) result, (uint32_t) sizeof(result) );
+ // ckb_debug(result);
+ // duk_pop(duk_ctx);  /* pop result/error */
+ // // saving status of properties to godwoken sys storage
+ // save_duktape_contract_status(duk_ctx, gw_ctx, to_id);
+ // status = 0;
+ // return result;
+
+  if (duk_check_type(duk_ctx, -1, DUK_TYPE_NUMBER)){
+    const char* result = duk_safe_to_string(duk_ctx, -1);
+    debug_print_data("[execute in duktape] execute method result (number)", (const uint8_t*) result, (uint32_t) sizeof(result));
+    ckb_debug(result);
+    duk_pop(duk_ctx);  /* pop result/error */
+
+    //duk_to_int(duk_ctx, -1);
+    //const char* result 
+    // double a = (double)duk_get_number(duk_ctx, -1);
+    // char arr[sizeof(a)];
+    // memcpy(arr,&a,sizeof(a));
+
+    debug_print_data("result: ", (const uint8_t*)result, (uint32_t) sizeof(result));
+
+    //covert result to output(which is a simple 4 bytes hex value)
+    int result_int;
+
+    // char* data = (char*)result;
+    // size_t data_len = sizeof(result); 
+    // char* g_debug_buffer;
+    // int offset = 0;
+    // for (size_t i = 0; i < data_len; i++) {
+    //   offset += sprintf(g_debug_buffer + offset, "%02x", data[i]);
+    // }
+    // g_debug_buffer[offset] = '\0';
+    // ckb_debug(g_debug_buffer);
+
+    sscanf(result, "%d", &result_int);
+    debug_print_int("result int:", result_int);
+    char strHexTemp[8];
+    sprintf(strHexTemp, "%x", result_int);
+    char* hexstr = strHexTemp;
+    ckb_debug(hexstr);
+    unsigned char out[8];
+    int outlen = 0;
+    StringHextoHex(hexstr, out, &outlen);
+
+    debug_print_data("[execute in duktape] execute method result (hex number)", (const uint8_t*) out, (uint32_t) sizeof(out));
+    // const uint8_t* final_output =  (const uint8_t*) out;
+    // char* output;
+    // char* data = (char*)result;
+    // int offset = 0;
+    // for (size_t i = 0; i < sizeof(data); i++) {
+    //   offset += sprintf(output + offset, "%02x", data[i]);
+    // }
+    // output[offset] = '\0';
+    // ckb_debug(output);
+
+    // saving status of properties to godwoken sys storage
+    save_duktape_contract_status(duk_ctx, gw_ctx, to_id);
+    status = 0;
+
+    return (const char*)hexstr;
+  }else{
+    const char* result = duk_safe_to_string(duk_ctx, -1);
+    debug_print_data("[execute in duktape] execute method result", (const uint8_t*) result, (uint32_t) sizeof(result) );
+    ckb_debug(result);
+    duk_pop(duk_ctx);  /* pop result/error */
+    // saving status of properties to godwoken sys storage
+    save_duktape_contract_status(duk_ctx, gw_ctx, to_id);
+    status = 0;
+    return result;
+  }
 }
 
 // the js vm
@@ -1299,17 +1390,7 @@ int execute_in_duktape(gw_context_t* ctx,
   debug_print_int("[execute_in_duktape] code size", code_size);
   debug_print_int("[execute_in_duktape] input_size", msg->input_size);
   debug_print_data("msg->input_data", msg->input_data, msg->input_size);
-  
-  // const char method[] = "get()";
-  // union ethash_hash256 ethash = ethash::keccak256((const uint8_t*) method, sizeof(method)-1); // remove /0 at the end
-  // debug_print_data("keccak hash for get():", (const uint8_t*)ethash.bytes, 32);
 
-  // if(!is_create(msg->kind)){
-  //   test_duktape_vm(ctx, to_id);
-  //   test_save_var(ctx, to_id);
-  // }else{
-  //   test_store_js_contract(ctx, to_id);
-  // }
   duk_context* duk_ctx = init_duktape_vm();
 
   if(is_create(msg->kind)){
@@ -1334,10 +1415,11 @@ int execute_in_duktape(gw_context_t* ctx,
       int parameter_int = (int)method_parameter[0] * pow(16, 6) + (int)method_parameter[1] * pow(16, 4) + (int)method_parameter[2] * pow(16, 2) + (int)method_parameter[3];
       debug_print_int("covert parameter to int", parameter_int);
       const char* exec_result = execute_contract_method_with_dummy_parameters(duk_ctx, (char*)method_name, parameter_int, status, ctx, to_id);
-      memcpy(&method_exec_result[28], &exec_result, 4);
+      ckb_debug(exec_result);
+      memcpy(&method_exec_result, &exec_result, sizeof(exec_result));
     }else{
       const char* exec_result = execute_contract_method(duk_ctx, (char*)method_name, status, ctx, to_id);
-      memcpy(&method_exec_result[28], &exec_result, 4);
+      memcpy(&method_exec_result, &exec_result, sizeof(exec_result));
     }
 
     if(status != 0){
