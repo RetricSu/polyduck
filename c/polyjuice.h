@@ -1283,7 +1283,7 @@ const char* execute_contract_method_with_dummy_parameters(duk_context* duk_ctx, 
   }
 }
 
-const char* execute_contract_method(duk_context* duk_ctx, char* method_name, int status, gw_context_t* gw_ctx, uint32_t to_id){
+const char* execute_contract_method(duk_context* duk_ctx, char* method_name, int status, uint8_t* execute_result, gw_context_t* gw_ctx, uint32_t to_id){
   duk_get_prop_string(duk_ctx, -1 /*index*/, method_name);
   if (duk_pcall(duk_ctx, 0 /*nargs*/) != 0) {
     const char* err = duk_safe_to_string(duk_ctx, -1);
@@ -1341,6 +1341,8 @@ const char* execute_contract_method(duk_context* duk_ctx, char* method_name, int
     StringHextoHex(hexstr, out, &outlen);
 
     debug_print_data("[execute in duktape] execute method result (hex number)", (const uint8_t*) out, (uint32_t) sizeof(out));
+    execute_result = (uint8_t*) out;
+    //debug_print_data("[execute in duktape] execute method result (hex number)", (const uint8_t*) execute_result, (uint32_t) sizeof(execute_result));
     // const uint8_t* final_output =  (const uint8_t*) out;
     // char* output;
     // char* data = (char*)result;
@@ -1352,7 +1354,7 @@ const char* execute_contract_method(duk_context* duk_ctx, char* method_name, int
     // ckb_debug(output);
 
     // saving status of properties to godwoken sys storage
-    save_duktape_contract_status(duk_ctx, gw_ctx, to_id);
+    //save_duktape_contract_status(duk_ctx, gw_ctx, to_id);
     status = 0;
 
     return (const char*)hexstr;
@@ -1400,7 +1402,7 @@ int execute_in_duktape(gw_context_t* ctx,
      goto duktape_vm_cleanup;
   }else{
     int status;
-    char method_exec_result[32] = {0};
+    uint8_t method_exec_result[32] = {0};
 
     init_duktape_contract(ctx, duk_ctx, to_id);
     const char* method_name = (const char*) msg->input_data;
@@ -1416,10 +1418,13 @@ int execute_in_duktape(gw_context_t* ctx,
       debug_print_int("covert parameter to int", parameter_int);
       const char* exec_result = execute_contract_method_with_dummy_parameters(duk_ctx, (char*)method_name, parameter_int, status, ctx, to_id);
       ckb_debug(exec_result);
-      memcpy(&method_exec_result, &exec_result, sizeof(exec_result));
+      //memcpy(&method_exec_result, &exec_result, sizeof(exec_result));
     }else{
-      const char* exec_result = execute_contract_method(duk_ctx, (char*)method_name, status, ctx, to_id);
-      memcpy(&method_exec_result, &exec_result, sizeof(exec_result));
+      uint8_t tr[8];
+      uint8_t* test_result = tr;
+      const char* exec_result = execute_contract_method(duk_ctx, (char*)method_name, status, test_result, ctx, to_id);
+      debug_print_data("[execute in duktape] execute method result (hex number)", (const uint8_t*) test_result, (uint32_t) sizeof(test_result));
+      //memcpy(&method_exec_result, &exec_result, sizeof(exec_result));
     }
 
     if(status != 0){
